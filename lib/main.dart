@@ -1,113 +1,413 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:camera/camera.dart';
+import 'package:dio/dio.dart';
+import 'dart:async';
+import 'package:flutter/cupertino.dart';
+import 'package:fluttertoast/fluttertoast.dart';
+import 'package:image_picker/image_picker.dart';
 
-void main() {
-  runApp(MyApp());
+Future<void> main() async {
+  List<CameraDescription> cameras = [];
+
+  void logError(String code, String? message) {
+    if (message != null) {
+      print('Error: $code\nError Message: $message');
+    } else {
+      print('Error: $code');
+    }
+  }
+
+  // Ensure plugin is initialized
+  try {
+    WidgetsFlutterBinding.ensureInitialized();
+    cameras = await availableCameras(); // get list of cameras
+  } on CameraException catch (e) {
+    logError(e.code, e.description);
+  }
+
+  runApp(MyApp(firstCamera: cameras.first));
 }
 
 class MyApp extends StatelessWidget {
   // This widget is the root of your application.
+  final firstCamera;
+
+  MyApp({this.firstCamera});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Flutter Demo',
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // Try running your application with "flutter run". You'll see the
-        // application has a blue toolbar. Then, without quitting the app, try
-        // changing the primarySwatch below to Colors.green and then invoke
-        // "hot reload" (press "r" in the console where you ran "flutter run",
-        // or simply save your changes to "hot reload" in a Flutter IDE).
-        // Notice that the counter didn't reset back to zero; the application
-        // is not restarted.
         primarySwatch: Colors.blue,
+        primaryColor: Color.fromRGBO(70, 224, 164, 1),
       ),
-      home: MyHomePage(title: 'Flutter Demo Home Page'),
+      home: TakePictureScreen(camera: firstCamera),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  MyHomePage({Key? key, required this.title}) : super(key: key);
+class TakePictureScreen extends StatefulWidget {
+  CameraDescription camera;
 
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+  TakePictureScreen({
+    Key? key,
+    required this.camera,
+  }) : super(key: key);
 
   @override
-  _MyHomePageState createState() => _MyHomePageState();
+  _TakePictureScreenState createState() => _TakePictureScreenState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _TakePictureScreenState extends State<TakePictureScreen> {
+  double _currentZoomValue = 0;
+  CameraController? _controller;
+  Future<void>? _initializeControllerFuture;
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  @override
+  void initState() {
+    super.initState();
+    // Display the current output from the Camera
+    _controller = CameraController(
+      widget.camera,
+      ResolutionPreset.medium,
+    );
+    _initializeControllerFuture = _controller!.initialize();
+  }
+
+  @override
+  void dispose() {
+    _controller!.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
+    final mediaQuery = MediaQuery.of(context);
+    final PreferredSizeWidget appBar = AppBar(
+      title: Text('Camera Demo'),
+    );
+
+    XFile? _imageFile;
+    void _onPickImagePressed(BuildContext context) async {
+      final ImagePicker _picker = ImagePicker();
+      final pickedFile = await _picker.pickImage(source: ImageSource.gallery);
+      setState(() {
+        _imageFile = pickedFile;
+      });
+
+      if (_imageFile == null) {
+        return;
+      }
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => DisplayPictureScreen(
+            imagePath: _imageFile!.path,
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      appBar: appBar,
+      body: Column(
+        children: [
+          Center(
+            child: Container(
+              width: mediaQuery.size.width,
+              height: (mediaQuery.size.height -
+                      appBar.preferredSize.height -
+                      mediaQuery.padding.top) *
+                  0.8,
+              child: LayoutBuilder(
+                builder: (context, constraints) => Stack(
+                  children: [
+                    Container(
+                      child: FutureBuilder<void>(
+                        future: _initializeControllerFuture,
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState ==
+                              ConnectionState.done) {
+                            return CameraPreview(_controller!);
+                            // return Container(color: Colors.pink);
+                          } else {
+                            return Center(child: CircularProgressIndicator());
+                          }
+                        },
+                      ),
+                    ),
+                    Positioned(
+                      top: 110,
+                      left: 20,
+                      child: IconButton(
+                        iconSize: 300,
+                        onPressed: () {},
+                        icon: Icon(
+                          Icons.crop_free_rounded,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.start,
+                        children: [
+                          IconButton(
+                            onPressed: () {},
+                            icon: Icon(
+                              Icons.close,
+                              color: Colors.white,
+                            ),
+                          ),
+                          Expanded(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                IconButton(
+                                  onPressed: () {
+                                    _controller!.setFlashMode(FlashMode.auto);
+                                  },
+                                  icon: Icon(
+                                    Icons.flash_on,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                IconButton(
+                                  onPressed: () {
+                                    setState(() {
+                                      // print(widget.camera.lensDirection);
+                                      // _controller!.description.lensDirection == CameraLensDirection.back
+                                    });
+                                  },
+                                  icon: Icon(
+                                    Icons.flip_camera_ios,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Positioned(
+                      right: 0,
+                      bottom: 50,
+                      child: Column(
+                        children: [
+                          Icon(
+                            Icons.add,
+                            color: Colors.white,
+                          ),
+                          RotatedBox(
+                            quarterTurns: 3,
+                            child: Container(
+                              child: Slider(
+                                value: _currentZoomValue,
+                                min: 0,
+                                max: 4,
+                                onChanged: (double value) {
+                                  setState(() {
+                                    _currentZoomValue = value;
+                                    _controller!
+                                        .setZoomLevel(_currentZoomValue);
+                                  });
+                                },
+                              ),
+                            ),
+                          ),
+                          Icon(
+                            Icons.remove,
+                            color: Colors.white,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Container(
+            height: (mediaQuery.size.height -
+                    appBar.preferredSize.height -
+                    mediaQuery.padding.top) *
+                0.2,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(20),
+                topRight: Radius.circular(20),
+              ),
+              // color: Colors.black12,
+              // backgroundBlendMode: BlendMode.overlay,
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                OutlinedButton(
+                  onPressed: () => _onPickImagePressed(context),
+                  style: OutlinedButton.styleFrom(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.all(
+                        Radius.circular(30),
+                      ),
+                    ),
+                    primary: Theme.of(context).primaryColor,
+                    side: BorderSide(
+                      color: Theme.of(context).primaryColor,
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Text('Photos'),
+                  ),
+                ),
+                Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.all(
+                      Radius.circular(100),
+                    ),
+                    // color: Colors.red,
+                    border: Border.all(
+                      color: Theme.of(context).primaryColor,
+                      width: 4,
+                    ),
+                  ),
+                  padding: EdgeInsets.all(3),
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      try {
+                        await _controller!.takePicture().then((value) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) =>
+                                  DisplayPictureScreen(imagePath: value.path),
+                            ),
+                          );
+                        });
+                      } catch (e) {
+                        print(e);
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.all(
+                          Radius.circular(100),
+                        ),
+                      ),
+                      primary: Theme.of(context).primaryColor,
+                      minimumSize: Size(70, 70),
+                    ),
+                    child: null,
+                  ),
+                ),
+                FittedBox(
+                  child: TextButton(
+                    onPressed: () {},
+                    style: TextButton.styleFrom(
+                      primary: Theme.of(context).primaryColor,
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.help_outline_rounded),
+                        Text('Instructions'),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class DisplayPictureScreen extends StatefulWidget {
+  final String imagePath;
+  const DisplayPictureScreen({
+    Key? key,
+    required this.imagePath,
+  }) : super(key: key);
+
+  @override
+  _DisplayPictureScreenState createState() => _DisplayPictureScreenState();
+}
+
+class _DisplayPictureScreenState extends State<DisplayPictureScreen> {
+  _upLoadImage(File image) async {
+    String path = image.path;
+    var name = path.substring(path.lastIndexOf("/") + 1, path.length);
+    var suffix = name.substring(name.lastIndexOf(".") + 1, name.length);
+    FormData formData = FormData.fromMap(
+        {"image_file": await MultipartFile.fromFile(path, filename: name)});
+
+    Dio dio = new Dio();
+    var respone = await dio.post<String>(
+        "http://6d9b-2402-800-6344-a20b-f03a-6de4-b8c-9e4.ngrok.io/",
+        data: formData);
+    if (respone.statusCode == 200) {
+      Fluttertoast.showToast(
+          msg: 'Success!',
+          gravity: ToastGravity.BOTTOM,
+          textColor: Colors.grey);
+      // setState(() {
+      //   _label = jsonDecode(respone.data.toString())['label'];
+      //   _score = jsonDecode(respone.data.toString())['score'];
+      //   loadingdone = true;
+      // });
+    } else {
+      Fluttertoast.showToast(
+          msg: 'Error!', gravity: ToastGravity.BOTTOM, textColor: Colors.grey);
+    }
+  }
+
+  Future getImage(File image) async {
+    // var image = await ImagePicker.pickImage(source: ImageSource.gallery);
+    _upLoadImage(image);
+    // setState(() {
+    //   _image = image;
+    // });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mediaQuery = MediaQuery.of(context);
+
     return Scaffold(
       appBar: AppBar(
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+        title: Text('Display the picture'),
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
+      body: Container(
         child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Invoke "debug painting" (press "p" in the console, choose the
-          // "Toggle Debug Paint" action from the Flutter Inspector in Android
-          // Studio, or the "Toggle Debug Paint" command in Visual Studio Code)
-          // to see the wireframe for each widget.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Text(
-              'You have pushed the button this many times:',
+          children: [
+            Container(
+              height: mediaQuery.size.height * 0.8,
+              child: Center(
+                child: Image.file(
+                  File(widget.imagePath),
+                ),
+              ),
             ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headline4,
+            Container(
+              child: FittedBox(
+                child: ElevatedButton(
+                  onPressed: () async {
+                    getImage(File(widget.imagePath));
+                  },
+                  child: Text('Click me'),
+                ),
+              ),
             ),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
 }
